@@ -1,0 +1,1 @@
+explore/payoff/SEM/D(ZD-GTFT-2)/SEM(ZD-GTFT-2)/place/wins[0.1, 2.538, 0.024, 0.09699999999999998, 0.031, 1.0, 5.0]
