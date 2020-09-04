@@ -1,0 +1,2 @@
+explore, PREDICTOR, RANDOM, ZD-GTFT-2, TFT, WSLS, ALLD, ZD-Extort-2, JOSS, GTFT, ALLC, 
+0.1, 1.17, 2.89, 2.94, 2.9, 2.91, 0.95, 1.12, 2.65, 2.97, 4.89, 
