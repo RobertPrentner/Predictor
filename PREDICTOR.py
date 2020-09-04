@@ -19,71 +19,6 @@ for tup in itertools.product((1,-1),repeat=2): random_model[tup] = 0.5
 
 payoff={(1,1): 3, (1,-1):0, (-1,1): 5, (-1,-1):1}
 
-class History:
-
-    def __init__(self,discount=1.,depth=2,thresh = 0.01):
-        self.discount = discount
-        self.depth = depth
-        self.thresh = thresh
-        self.h=numpy.zeros((4**depth,2*(depth+1)),dtype=int)
-        self.payoffs = numpy.zeros(4**depth,dtype=float)
-
-    def return_entry(self,row,col):
-        d = {0: [1, 1], 1: [1, -1], 2: [-1, 1], 3: [-1, -1]}
-        length = 4**(self.depth-col)
-        d_key = int(row/length)%4
-        e = d[d_key]
-        return e
-
-    def print_history(self):
-        for j in range(len(self.h)): print(self.h[j], numpy.around(self.payoffs[j],2))
-
-    def build_history(self,i,model):
-
-        #predict possible histories
-        self.h[:,0] = i[0]
-        self.h[:,1] = i[1]
-        for j in range(4**self.depth):
-            col = 1
-            while col <= self.depth:
-                entry = self.return_entry(j,col)
-                self.h[j,2*col] = entry[0]
-                self.h[j,2*col+1] = entry[1]
-                col += 1
-
-        #calculate payoffs and probabilities
-        remove_lines=[]
-        for j in range(4**self.depth):
-            col = 1
-            self.payoffs[j] = payoff[tuple(self.h[j,0:2])]
-            while col <= self.depth:
-                alpha = self.discount ** col
-                source = tuple(numpy.flip(self.h[j, 2*col-2:2*col]))
-                state = tuple(self.h[j,2*col:2*col+2])
-                pC = model[source]
-                p = pC if state[1] == 1 else (1-pC)
-                #print(j,col,":", source, "->", state, p)
-                po = payoff[state]
-                if p <= self.thresh:
-                    remove_lines.append(j)
-                    self.payoffs[j] = 0
-                    break
-                else: self.payoffs[j] +=  p * po * alpha
-                col += 1
-
-        #print(remove_lines)
-        #self.h = numpy.delete(self.h,(0),axis=0)
-        #for line in self.h: print(line)
-        self.h = numpy.delete(self.h, remove_lines,axis=0)
-        self.payoffs = numpy.delete(self.payoffs,remove_lines)
-        #self.print_history()
-
-    def find_max_history(self):
-        index = numpy.argmax(self.payoffs)
-        h = self.h[index]
-        po = self.payoffs[index]
-        return h,po
-
 class Predictor:
 
     def __init__(self,model,explore,thresh,depth,discount,payoff):
@@ -96,8 +31,6 @@ class Predictor:
         self.depth = depth  # the depth to look for
         self.payoff = payoff #the payoff model
         self.decision = random.choice((-1,1)) #initial decision
-        self.predicted_history = History(self.discount,self.depth,self.thresh)
-        self.max_history = ([1]*2*(self.depth+1),self.payoff[(1,1)])
 
     def calculate_p1(self,initial,print_flag=False):
         #P1(C) = PO(CC)p(C|initial) + PO(CD)*p(D|initial)
@@ -136,13 +69,13 @@ class Predictor:
             print("payoff for choosing D, then D:", P2DD)
         return P2CD,P2DD
 
-    def calculate_history_alt(self, i,print_flag=False):
+    def calculate_history(self,initial,print_flag):
         # drop last histories and replace with newest
         return 0
         # if print_flag: print(self.input)
 
 
-    def decide_alt(self,initial,print_flag=True):
+    def decide(self,initial,print_flag=True):
         #<PO>_1 = <PO>(C) + <PO>(CD)
         #<PO>_2 = <PO>(D) + <PO>(DD)
         poC,poD = self.calculate_p1(initial, print_flag=print_flag)
@@ -153,26 +86,6 @@ class Predictor:
             if print_flag: print("Take random desicion")
             self.decision = random.choice((-1, 1))
         if print_flag: print("Decision:", self.decision)
-
-    def calculate_history(self,initial,print_flag=False):
-        #re-initzialize predicted histories
-        self.predicted_history.__init__(self.discount,self.depth,self.thresh)
-        #self.max_history.__init__(initial,0)
-        # calculate possible histories
-        self.predicted_history.build_history(initial,self.model)
-        if print_flag: self.predicted_history.print_history()
-        ####
-
-    def decide(self,print_flag=False):
-        try:
-            h,po = self.predicted_history.find_max_history()
-            self.max_history=(h,po)
-            self.decision = h[2]
-            if print_flag:  print("Best history:", self.max_history,"-> decision:", self.decision)
-        except:
-            print("Warning: Not predicted the future long enough")
-            self.decision = random.choice((-1,1))
-        ###
 
     def update_model(self,data,print_flag=False):
         if print_flag: print(" Update model")
@@ -198,16 +111,16 @@ class FixedStrategy:
         #print(self.type,strategy[0])
         self.decision = strategy[0] #initial decision
 
-    def decide(self,print_flag=False):
+    def decide(self,initial,print_flag=False):
         decision_input = [ item for sublist in self.input for item in sublist]
         pC = self.strategy[tuple(decision_input)]
         self.decision = random.choices((1,-1),weights=[pC,1-pC])[0]
         if print_flag: print(" Strategy decision:", self.decision)
 
-    def calculate_history(self,i,print_flag=False):
+    def calculate_history(self,initial,print_flag=False):
         #drop last histories and replace with newest
         self.input.pop(self.memory_length-1)
-        self.input.insert(0,tuple(i))
+        self.input.insert(0,tuple(initial))
         #if print_flag: print(self.input)
 
 class Tournament:
@@ -219,7 +132,7 @@ class Tournament:
         self.comparison = numpy.zeros((1,10),dtype=float)
         self.predictor_score = [0]*self.nturn
 
-    def round(self,player,opponent,initial,print_flag=False,alt_flag=False): #One round of the game with nturn turns
+    def round(self,player,opponent,initial,print_flag=False): #One round of the game with nturn turns
 
         if not initial: i = random.choices((-1, 1),k=2)
         else: i = initial
@@ -234,21 +147,16 @@ class Tournament:
             # infer decision:
             if print_flag: print("---", nt + 1, "---")
 
-            if alt_flag and "PREDICTOR" in player.type:
-                player.calculate_history_alt(i,print_flag=False)
-                player.decide_alt(i,print_flag=print_flag)
-            else:
-                player.calculate_history(i, print_flag=print_flag)
-                player.decide(print_flag=print_flag)
+            player.calculate_history(i, print_flag=print_flag)
+            player.decide(i,print_flag=print_flag)
 
             #seed1 = numpy.random.rand()
             #if seed1 < player.explore: d1 = random.choice((1,-1))
             #else: d1 = player.decision
             d1 = player.decision if nt >= int(self.nturn*player.explore) else random.choice((1,-1))
-            if alt_flag and "PREDICTOR" in opponent.type: opponent.decide_alt(i,print_flag=print_flag)
-            else:
-                opponent.calculate_history(list(reversed(i)), print_flag=print_flag)
-                opponent.decide(print_flag=print_flag)
+
+            opponent.calculate_history(list(reversed(i)), print_flag=print_flag)
+            opponent.decide(i,print_flag=print_flag)
 
             #seed2 = numpy.random.rand()
             #if seed2 < opponent.explore: d2 = random.choice((1, -1))
@@ -296,7 +204,7 @@ class Tournament:
 
         return ave_p,game_history
 
-    def match(self,player,opponent,initial=[],print_flag=False,alt_flag=False): #One match for iter iterations
+    def match(self,player,opponent,initial=[],print_flag=False): #One match for iter iterations
         ave_p = numpy.zeros((self.iter, 2))
         #ave_game_history = numpy.zeros((nturn + 1, 3))
         # play against one particular strategy
@@ -307,7 +215,7 @@ class Tournament:
             if initial == []: i = i1 + i2
             else: i = initial
             #if j == 0: i = random.choices((-1, 1), k=2) #randomiz initial actions for ALL agents
-            tup = tournament.round(copy.deepcopy(player), copy.deepcopy(opponent), i, print_flag,alt_flag)
+            tup = tournament.round(copy.deepcopy(player), copy.deepcopy(opponent), i, print_flag)
             #print(ave_p[j], tup[0])
             ave_p[j] = tup[0]
             if print_flag:
@@ -322,14 +230,14 @@ class Tournament:
             #ave_game_history += tup[1] / iter
         return numpy.append(numpy.mean(ave_p,axis=0),numpy.std(ave_p,axis=0))
 
-    def round_robin(self,players,print_flag=False,alt_flag=False):
+    def round_robin(self,players,print_flag=False):
         nplayers = len(players)
         self.payoffs = numpy.zeros((nplayers, nplayers), dtype=float)
         self.std = numpy.zeros((nplayers, nplayers), dtype=float)
         #for (i,j) in random_combination(range(nplayers),2): print(i,j)
         for (i,j) in itertools.combinations_with_replacement( range(nplayers),2):
-            result = self.match(players[i],players[j],[],print_flag,alt_flag)
-            print(players[i].type, "vs.",players[j].type, "payoffs:", numpy.around(result,3))
+            result = self.match(players[i],players[j],[],print_flag)
+            if print_flag: print(players[i].type, "vs.",players[j].type, "payoffs:", numpy.around(result,3))
             if i == j:
                 self.payoffs[i,j] = 0.5*(result[0]+result[1])
                 self.std[i,j] = 0.5*(result[2]+result[3])
@@ -365,12 +273,57 @@ class Tournament:
             print("std error of mean payoff:")
             for line in self.std: print(numpy.around(line,3))
 
+def initialize_fixed_strategies():
+    strategy = {(1, 1): 1., (1, -1): 0., (-1, 1): 1., (-1, -1): 0., 0: 1}  # TFT
+    TFT = FixedStrategy(strategy, "TFT", memory_length=1)
+
+    strategy = {(1, 1): 1., (1, -1): 0., (-1, 1): 0., (-1, -1): 1., 0: 1}  # WSLS (aka Pavlov)
+    WSLS = FixedStrategy(strategy, "WSLS", memory_length=1)
+
+    strategy = {(1, 1): 1., (1, -1): 1 / 3, (-1, 1): 1., (-1, -1): 1 / 3, 0: 1}  # Generous TFT
+    GTFT = FixedStrategy(strategy, "GTFT", memory_length=1)
+
+    strategy = {(1, 1): 0., (1, -1): 0., (-1, 1): 0., (-1, -1): 0., 0: -1}  # Defector
+    ALLD = FixedStrategy(strategy, "ALLD", memory_length=1)
+
+    strategy = {(1, 1): 1., (1, -1): 1., (-1, 1): 1., (-1, -1): 1., 0: 1}  # Coperator
+    ALLC = FixedStrategy(strategy, "ALLC", memory_length=1)
+
+    strategy = {(1, 1): 0., (1, -1): 0., (-1, 1): 1., (-1, -1): 1., 0: 1}  # Alternator
+    ALT = FixedStrategy(strategy, "ALT", memory_length=1)
+
+    strategy = {(1, 1): 9 / 10, (1, -1): 0., (-1, 1): 9 / 10, (-1, -1): 0., 0: 1}  # JOSS
+    JOSS = FixedStrategy(strategy, "JOSS", memory_length=1)
+
+    strategy = {(1, 1): 0., (1, -1): 0., (-1, 1): 1., (-1, -1): 1.}  # Trump (aka Bully)
+    TRUMP = FixedStrategy(strategy, "TRUMP", memory_length=1)
+
+    strategy = {(1, 1): 1., (1, -1): 1 / 8, (-1, 1): 1., (-1, -1): 1 / 4}  # ZD-GTFT-2
+    ZDGTFT = FixedStrategy(strategy, "ZD-GTFT-2", memory_length=1)
+
+    strategy = {(1, 1): 8 / 9, (1, -1): 1 / 2, (-1, 1): 1 / 3, (-1, -1): 0.}  # ZD-Extort-2
+    ZDExtort = FixedStrategy(strategy, "ZD-Extort-2", memory_length=1)
+
+    for d in itertools.product((-1, 1), repeat=4):
+        if (d[1] == -1 and d[3] == -1):
+            strategy[d] = 0.
+        else:
+            strategy[d] = 1.
+    strategy[0] = 1
+    strategy[1] = 1
+    TF2T = FixedStrategy(strategy, "TF2T", memory_length=2)
+
+    RANDOM = FixedStrategy(copy.deepcopy(random_model), "RANDOM", memory_length=1)
+
+    players = (TFT, GTFT, WSLS, ZDGTFT, ZDExtort, JOSS, ALLD, ALLC, RANDOM)  # ALT,TF2T,ALLC,ALLD,RANDOM
+    return players
+
 def output_explore(players,plot,compare,places):
 
     print("explore/payoff/SEM/D(ZD-GTFT-2)/SEM(ZD-GTFT-2)/place/wins")
-    f = open("../../manuscripts/IPD_Predictor/results0.txt", "w+")
-    f2 = open("../../manuscripts/IPD_Predictor/results1.txt", "w+")
-    f3 = open("../../manuscripts/IPD_Predictor/results2.txt", "w+")
+    f = open("results0.txt", "w+")
+    f2 = open("results1.txt", "w+")
+    f3 = open("results2.txt", "w+")
     f.write("explore/payoff/SEM/D(ZD-GTFT-2)/SEM(ZD-GTFT-2)/place/wins" + "\n")
     for line in plot:
         print(line)
@@ -403,8 +356,7 @@ def output_explore(players,plot,compare,places):
 
     return
 
-###MAIN; test a predicitve model for the IPD #####
-
+###MAIN; test PREDICTOR in a tournament #####
 start_time = time.time()
 random.seed(1902) #set randoom seed
 numpy.random.seed(1902)
@@ -416,85 +368,34 @@ discount = 1
 #hyper-parameters of agent
 thresh = 0.01
 depth = 2#should be even and less than nturn
-#nhis = 4**(depth+1)#make nhis large enough to record them all
-#searches = 4**(depth+1) #search often enough
 explore = 0.1 #fraction of exploration steps
 
 ##define fixed strategies
-strategy = {(1,1): 1., (1,-1): 0., (-1,1): 1., (-1,-1): 0., 0: 1} #TFT
-TFT = FixedStrategy(strategy,"TFT",memory_length=1)
-
-strategy = {(1,1): 1., (1,-1): 0., (-1,1): 0., (-1,-1): 1., 0: 1} #WSLS (aka Pavlov)
-WSLS =  FixedStrategy(strategy,"WSLS",memory_length=1)
-
-strategy = {(1,1): 1., (1,-1): 1/3, (-1,1): 1., (-1,-1): 1/3, 0: 1} #Generous TFT
-GTFT =  FixedStrategy(strategy,"GTFT",memory_length=1)
-
-strategy = {(1,1): 0., (1,-1): 0., (-1,1): 0., (-1,-1): 0., 0: -1} #Defector
-ALLD = FixedStrategy(strategy,"ALLD",memory_length=1)
-
-strategy = {(1,1): 1., (1,-1): 1., (-1,1): 1., (-1,-1): 1., 0: 1} #Coperator
-ALLC = FixedStrategy(strategy,"ALLC",memory_length=1)
-
-strategy = {(1,1): 0., (1,-1): 0., (-1,1): 1., (-1,-1): 1., 0: 1} #Alternator
-ALT = FixedStrategy(strategy,"ALT",memory_length=1)
-
-strategy = {(1,1): 9/10, (1,-1): 0., (-1,1): 9/10, (-1,-1): 0., 0: 1} #JOSS
-JOSS = FixedStrategy(strategy,"JOSS",memory_length=1)
-
-strategy = {(1,1): 0., (1,-1): 0., (-1,1): 1., (-1,-1): 1.} #Trump (aka Bully)
-TRUMP = FixedStrategy(strategy,"TRUMP",memory_length=1)
-
-strategy = {(1,1): 1., (1,-1): 1/8, (-1,1): 1., (-1,-1): 1/4 } #ZD-GTFT-2
-ZDGTFT =  FixedStrategy(strategy,"ZD-GTFT-2",memory_length=1)
-
-strategy = {(1,1): 8/9, (1,-1): 1/2, (-1,1): 1/3, (-1,-1): 0.} #ZD-Extort-2
-ZDExtort =  FixedStrategy(strategy,"ZD-Extort-2",memory_length=1)
-
-for d in itertools.product((-1,1),repeat=4):
-    if (d[1] == -1 and d[3] == -1): strategy[d] = 0.
-    else: strategy[d] = 1.
-strategy[0] = 1
-strategy[1] = 1
-TF2T = FixedStrategy(strategy,"TF2T",memory_length=2)
-RANDOM =  FixedStrategy(copy.deepcopy(random_model),"RANDOM",memory_length=1)
-
+players = list(initialize_fixed_strategies())
 agent = Predictor(random_model,explore,thresh,depth,discount,payoff)
-players = [TFT,GTFT,WSLS,ZDGTFT,ZDExtort,JOSS,ALLD,ALLC,RANDOM] #ALT,TF2T,ALLC,ALLD,RANDOM
 random.shuffle(players)
 players = [agent] + players
 tournament = Tournament(nturn,iter,discount)
 
-
-#tournament.iter = 1
-#tournament.nturn = 200
-#initial = [1,-1]#random.choices((-1, 1),k=2)
-#agent.model = {(1,1): 4/5, (1,-1): 1/2, (-1,1): 1/2, (-1,-1): 1/2}
-#for key in agent.model: print(key,agent.model[key])
-#agent.model = random_model
-#agent.calculate_p1(initial,print_flag=True)
-#agent.calculate_p2(initial,print_flag=True)
-#print("initial value:", initial)
-#agent.decide_alt(initial,print_flag=True)
-#sys.exit()
-
+#test single match
 #agent.explore=0.
 #tournament.iter = 1
 #tournament.nturn = 200
-#tournament.match(agent,RANDOM,print_flag=True,alt_flag=True)
-#tournament.match(agent,TFT,initial=[-1,-1],print_flag=True,alt_flag=True)
-#tournament.match(agent,TF2T,print_flag=True,alt_flag=True)
+#tournament.match(agent,RANDOM,print_flag=True)
+#tournament.match(agent,TFT,initial=[-1,-1],print_flag=True)
+#tournament.match(agent,TF2T,print_flag=True)
 #sys.exit()
 
+#test single round robin
 #tournament.iter = 10
 #tournament.nturn = 500
 #agent.explore = 0.85
 #tournament.round_robin(players, False)
 #tournament.generate_results(players, print_flag=True)
 
-
-
-frac = 1
+frac = 21
+#1 for the single tournament with p=0.1
+#21 for doing exploration vs. exploitation and reproduce the paper
 plot = numpy.zeros((frac,7),dtype=float)
 compare = numpy.zeros((frac,len(players)+1),dtype =float)
 places = numpy.zeros((frac,len(players)),dtype =float)
@@ -503,8 +404,8 @@ for i in range(frac):
         explore = i*1./(frac-1)
         agent.explore = explore
     #if explore > 0.1: break
-    tournament.round_robin(players,print_flag=False,alt_flag=True)
-    tournament.generate_results(players,print_flag=True)
+    tournament.round_robin(players,print_flag=False)
+    tournament.generate_results(players,print_flag=False)
 
     plot[i] = [ numpy.around(explore,2),
                 tournament.results["PREDICTOR"][0],
@@ -521,11 +422,7 @@ for i in range(frac):
 #output exploration vs results
 output_explore(players,plot,compare,places)
 
-#ave_p = tournament.match(agent,TFT,print_flag=False)
 print("PREDICTORs payoff after", nturn, "rounds and", iter, "iterations:", numpy.sum(tournament.predictor_score))
-for a in numpy.around(tournament.predictor_score,3):
-    print(str(a), end = ",")
-
-
-#print("Learned model:", agent.model)#{(key, numpy.around(agent.model[key], 2)) for key in agent.model})
+#for a in numpy.around(tournament.predictor_score,3):
+#    print(str(a), end = ",")
 print("Running time: %s seconds" % numpy.around(time.time() - start_time,2))
